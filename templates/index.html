@@ -1,0 +1,824 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Move Explorer</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --panel: #ffffff; --text: #1f2328; --muted: #6b7078; --border: #e2e0db;
+    --light: #eeeed2; --dark: #769656; --sel: #f6f669; --last: #cdd26a; --check: #e05555;
+    --accent: #2f6fdb; --capture: #c0392b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #17181b; --panel: #222429; --text: #e6e6e6; --muted: #9aa0a8; --border: #34373d;
+            --accent: #6ea2ff; --capture: #ff7b6b; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); }
+  main { display: grid; grid-template-columns: minmax(300px, min(780px, calc(100vh - 110px))) 1fr; gap: 20px; padding: 16px 20px; align-items: start; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+  @media (min-width: 861px) { .board-card { position: sticky; top: 12px; z-index: 5; } }  /* z-index keeps its pop-ups above the side panel */
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  #status { font-weight: 600; margin-bottom: 10px; }
+  #board { --n: 8; display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); grid-template-rows: repeat(var(--n), minmax(0, 1fr)); aspect-ratio: 1; width: 100%; container-type: inline-size; border-radius: 4px; overflow: hidden; user-select: none; }
+  .sq { position: relative; aspect-ratio: 1; min-width: 0; min-height: 0; overflow: hidden; display: flex; align-items: center; justify-content: center; cursor: pointer;
+        font-size: 9.5cqw; line-height: 1; }
+  .sq.light { background: var(--light); } .sq.dark { background: var(--dark); }
+  .sq.last { background: var(--last); } .sq.sel { background: var(--sel); }
+  .sq.check { background: radial-gradient(circle, var(--check) 30%, transparent 75%), var(--light); }
+  .sq.target::after { content: ""; position: absolute; width: 28%; height: 28%; border-radius: 50%; background: rgba(0,0,0,.22); }
+  .sq.target.cap::after { width: 86%; height: 86%; background: transparent; border: 5px solid rgba(0,0,0,.22); }
+  .sq .coord { position: absolute; font-size: max(10px, 1.8cqw); font-weight: 600; opacity: .7; color: #333; }
+  .sq .rank { top: 2px; left: 3px; } .sq .file { bottom: 1px; right: 3px; }
+  .pw { color: #fff; text-shadow: 0 0 2px #000, 0 0 1px #000; } .pb { color: #000; }
+  .controls { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  h2 { font-size: 15px; margin: 0 0 8px; display: flex; justify-content: space-between; align-items: baseline; }
+  h2 small { color: var(--muted); font-weight: 400; }
+  .group { margin-bottom: 10px; }
+  .group-title { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 4px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  .chip { font-family: ui-monospace, Menlo, monospace; font-size: 13px; padding: 3px 8px; border-radius: 5px;
+          border: 1px solid var(--border); background: var(--bg); cursor: pointer; }
+  .chip:hover { border-color: var(--accent); }
+  .chip.cap { color: var(--capture); } .chip.chk { font-weight: 700; }
+  .chip.hl { outline: 2px solid var(--accent); }
+  #history { max-height: 420px; overflow: auto; position: relative; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { padding: 4px 6px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { font-weight: 600; color: var(--muted); font-size: 12px; }
+  tr.ply { cursor: pointer; } tr.ply:hover { background: var(--bg); }
+  tr.ply.current { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+  .count { font-variant-numeric: tabular-nums; }
+  .preview { color: var(--muted); white-space: normal; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .side { display: grid; gap: 16px; }
+  .err { color: var(--capture); }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+  .stat { background: var(--bg); border-radius: 8px; padding: 8px 10px; }
+  .stat .label { font-size: 12px; color: var(--muted); }
+  .stat .value { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .big { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .bar { height: 10px; border-radius: 5px; background: var(--bg); overflow: hidden; margin: 6px 0 4px; }
+  .bar > div { height: 100%; background: var(--accent); transition: width .3s; }
+  .bar.done > div { background: #2e9e5b; }
+  .note { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+  .verdict { font-weight: 600; margin-top: 4px; }
+  .section-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+                   color: var(--accent); margin: 4px 0 6px; }
+  .stats + .note + .section-title { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .stats { margin-top: 8px; }
+  .help-link { color: var(--accent); text-decoration: underline dotted; text-underline-offset: 3px; cursor: help;
+               font-weight: 600; margin-bottom: 10px; display: inline-block; }
+  .tip::before { content: ""; position: absolute; left: 0; right: 0; top: -8px; height: 8px; }  /* bridge so the mouse can reach the pop-up */
+  .tip a { color: var(--accent); }
+  .verdict-badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 10px; margin-bottom: 8px; }
+  .verdict-badge.yes { background: color-mix(in srgb, #2e9e5b 20%, transparent); color: #2e9e5b; }
+  .verdict-badge.no { background: color-mix(in srgb, var(--capture) 15%, transparent); color: var(--capture); }
+  .tip ul { margin: 0 0 8px; padding-left: 18px; } .tip li { margin-bottom: 3px; }
+  .shannon { color: var(--accent); text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
+  .tip-wrap { position: relative; display: inline-block; }
+  .tip { display: none; position: absolute; left: 0; top: calc(100% + 6px); z-index: 10; width: min(380px, 80vw);
+         background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px;
+         box-shadow: 0 6px 24px rgba(0,0,0,.18); padding: 12px 14px; font-size: 13px; font-weight: 400;
+         line-height: 1.5; text-transform: none; letter-spacing: normal; text-align: left; white-space: normal; }
+  .tip p { margin: 0 0 8px; } .tip p:last-child { margin: 0; }
+  .tip b { color: var(--text); }
+  .tip-wrap:hover .tip, .tip-wrap:focus-within .tip { display: block; }
+  .ladder-title { font-size: 13px; font-weight: 600; margin: 14px 0 6px; }
+  .ladder-title small { color: var(--muted); font-weight: 400; }
+  .rung { display: grid; grid-template-columns: 26px 1fr auto; gap: 2px 10px; align-items: center;
+          padding: 6px 8px; border-radius: 6px; margin-bottom: 4px; background: var(--bg); }
+  .rung .icon { font-size: 20px; grid-row: span 2; }
+  .rung .name { font-weight: 600; }
+  .rung .atoms { font-variant-numeric: tabular-nums; font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; }
+  .rung .fact { grid-column: 2 / 4; color: var(--muted); font-size: 12px; }
+  .rung.passed { background: color-mix(in srgb, #2e9e5b 16%, var(--bg)); }
+  .rung.passed .name::after { content: " ✅"; }
+  .rung.next { outline: 2px dashed var(--accent); }
+  .game-switch { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 10px; }
+  .game-switch button { border: 0; border-radius: 0; padding: 6px 14px; }
+  .game-switch button + button { border-left: 1px solid var(--border); }
+  .game-switch button.active { background: var(--accent); color: #fff; }
+  .top-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .top-row #status { margin-bottom: 10px; }
+  #board.draughts { --light: #f1dfc0; --dark: #8a5a35; --last: #b98b4e; --sel: #d8b45a; }
+  .disc { width: 76%; height: 76%; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+          font-size: 5.5cqw; box-shadow: inset 0 -0.6cqw 0 rgba(0,0,0,.25), 0 0.3cqw 0.6cqw rgba(0,0,0,.35); }
+  .disc.dw { background: radial-gradient(circle at 35% 30%, #fffdf6, #e4dccb); border: 0.35cqw solid #b9ae98; color: #8a6d1d; }
+  .disc.db { background: radial-gradient(circle at 35% 30%, #4a4a4a, #141414); border: 0.35cqw solid #000; color: #e8c34a; }
+  .sq .num { position: absolute; top: 2px; left: 3px; font-size: max(9px, 1.6cqw); font-weight: 600; color: #f6e7cc; opacity: .8; }
+  /* Scrabble */
+  #board.scrabble { --n: 15; gap: 0.25cqw; background: #6b8f71; padding: 0.25cqw; border-radius: 6px; }
+  #board.scrabble .sq { background: #e7dfc6; font-size: 1.6cqw; font-weight: 700; color: rgba(0,0,0,.45); border-radius: 0.4cqw; }
+  #board.scrabble .sq.TW { background: #d9534f; color: #fff; } #board.scrabble .sq.DW { background: #f3b0a6; color: #7a2b23; }
+  #board.scrabble .sq.TL { background: #3d7cc9; color: #fff; } #board.scrabble .sq.DL { background: #a9d2f0; color: #1f4f7a; }
+  #board.scrabble .sq.filter { outline: 0.5cqw solid var(--accent); outline-offset: -0.5cqw; }
+  .tile { position: absolute; inset: 4%; border-radius: 0.5cqw; background: linear-gradient(#f8e7b8, #ecd08e);
+          box-shadow: 0 0.2cqw 0 #b8964e; display: flex; align-items: center; justify-content: center;
+          font-size: 4.3cqw; font-weight: 700; color: #2a2016; }
+  #board .tile { padding-right: 0.8cqw; }
+  .rack .tile { padding-right: 4px; }
+  .tile sub { position: absolute; right: 6%; bottom: 4%; font-size: 1.35cqw; letter-spacing: -0.06em; }
+  .tile.blank { color: #8a5a00; font-style: italic; }
+  .tile.last { box-shadow: 0 0 0 0.4cqw var(--accent); }
+  .tile.ghost { opacity: .75; background: #cfe0ff; box-shadow: 0 0 0 0.35cqw var(--accent); }
+  .rack-row { display: flex; align-items: center; gap: 10px; margin: 8px 0 0; flex-wrap: wrap; font-size: 13px; }
+  .rack-row.to-move .who { font-weight: 700; color: var(--accent); }
+  .rack-row .who { min-width: 150px; }
+  .rack { display: flex; gap: 4px; }
+  .rack .tile { position: relative; inset: auto; width: 30px; height: 30px; font-size: 17px; border-radius: 4px; box-shadow: 0 2px 0 #b8964e; }
+  .rack .tile sub { font-size: 9px; }
+  #move-filter { width: 100%; font: inherit; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border);
+                 background: var(--bg); color: var(--text); margin-bottom: 8px; }
+  /* Go */
+  #board.go { gap: 0; background: #dcb35c; border-radius: 6px; padding: 1cqw; }
+  #board.go .sq { overflow: visible; cursor: pointer; }
+  .gp::before, .gp::after { content: ""; position: absolute; background: #3b2a12; }
+  .gp::before { top: 50%; left: 0; right: 0; height: 1px; } .gp.l::before { left: 50%; } .gp.r::before { right: 50%; }
+  .gp::after { left: 50%; top: 0; bottom: 0; width: 1px; } .gp.t::after { top: 50%; } .gp.b::after { bottom: 50%; }
+  .hoshi { position: absolute; left: 50%; top: 50%; width: 22%; height: 22%; transform: translate(-50%, -50%);
+           border-radius: 50%; background: #3b2a12; }
+  .stone { position: absolute; inset: 4%; border-radius: 50%; z-index: 1; }
+  .stone.b { background: radial-gradient(circle at 35% 30%, #666, #050505 70%); box-shadow: 0 1px 2px rgba(0,0,0,.5); }
+  .stone.w { background: radial-gradient(circle at 35% 30%, #fff, #d4d0c8 80%); box-shadow: 0 1px 2px rgba(0,0,0,.45); }
+  .stone.last::after { content: ""; position: absolute; inset: 32%; border-radius: 50%; border: 2px solid #e04b3a; }
+  .stone.ghost, .stone.hover { opacity: .55; }
+  .stone.hover { display: none; }
+  .gp.can:hover .stone.hover { display: block; }
+  .gp.no { cursor: not-allowed; }
+  .gp.no .ko { position: absolute; inset: 30%; border: 2px solid #b03a2e; z-index: 1; }
+  #go-size { font: inherit; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border);
+             background: var(--panel); color: var(--text); margin-bottom: 10px; }
+  .maths { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 10px; }
+  .maths h3 { font-size: 13px; margin: 10px 0 4px; }
+  .maths h3:first-child { margin-top: 0; }
+  .eq { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; line-height: 1.7; background: var(--bg);
+        border-radius: 6px; padding: 6px 8px; max-height: 140px; overflow: auto; word-break: break-word; }
+  .eq .w { color: var(--accent); } .eq .b { color: var(--capture); }
+  .eq .res { font-weight: 700; color: var(--text); }
+</style>
+</head>
+<body>
+<main>
+  <section class="card board-card">
+    <div class="top-row">
+      <div class="game-switch" role="group" aria-label="Game type">
+        <button data-game="chess">♞ Chess</button>
+        <button data-game="draughts">⛂ Draughts</button>
+        <button data-game="scrabble">🔤 Scrabble</button>
+        <button data-game="go">⚫ Go</button>
+      </div>
+      <select id="go-size" title="Go board size" hidden>
+        <option value="19">19×19</option><option value="13">13×13</option><option value="9">9×9</option>
+      </select>
+      <span class="tip-wrap">
+        <a class="help-link" id="howto-link" target="_blank" rel="noopener">How to win</a>
+        <div class="tip" role="tooltip" id="howto-tip"></div>
+      </span>
+      <span class="tip-wrap">
+        <a class="help-link" id="ai-link" target="_blank" rel="noopener">Solved by computers?</a>
+        <div class="tip" role="tooltip" id="ai-tip"></div>
+      </span>
+      <div id="status">Loading…</div>
+    </div>
+    <div id="board"></div>
+    <div id="scrabble-info"></div>
+    <div class="controls">
+      <button id="back">◀ Back</button>
+      <button id="fwd">Forward ▶</button>
+      <button id="undo">Undo last move</button>
+      <button id="flip">Flip board</button>
+      <button id="reset">New game</button>
+      <button id="rand1">+1 random move</button>
+      <button id="rand10">+10 random moves</button>
+    </div>
+    <div id="error" class="err"></div>
+  </section>
+  <div class="side">
+    <section class="card">
+      <h2>Move counter <small id="counter-ply"></small></h2>
+      <div class="section-title">This game</div>
+      <div class="label">Moves available in this game (every option offered so far, added up)</div>
+      <div class="big" id="total-sum">0</div>
+      <div class="stats">
+        <div class="stat"><div class="label" id="white-label">Available to White</div><div class="value" id="white-sum">0</div></div>
+        <div class="stat"><div class="label" id="black-label">Available to Black</div><div class="value" id="black-sum">0</div></div>
+        <div class="stat"><div class="label">Moves played</div><div class="value" id="played">0</div></div>
+      </div>
+      <div class="note" id="game-avg"></div>
+
+      <div class="section-title">All possible games (<a class="shannon" href="https://en.wikipedia.org/wiki/Shannon_number" target="_blank" rel="noopener">Shannon's method</a>)</div>
+      <div class="label">Possible games of this length (all the options multiplied together)</div>
+      <div class="big" id="product">1</div>
+      <div class="bar" id="bar"><div id="bar-fill" style="width:0"></div></div>
+      <div class="note" id="bar-label"></div>
+      <div class="verdict" id="verdict"></div>
+      <div class="ladder-title">How many atoms is that? <small>(rough estimates)</small></div>
+      <div id="ladder"></div>
+      <p class="note">The <b>This game</b> count adds up the options offered in the one game on the board. It grows slowly:
+        chess never has more than 218 options in a position, draughts usually has fewer than 10, a Scrabble rack can have thousands, and a Go board starts with 361. The <b>Shannon</b> count multiplies them, because each option branches into a whole new game. That is the number
+        to compare with about 1.33×10<sup>50</sup> atoms on Earth. It's an estimate that assumes every branch
+        has as many options as the line actually played (<a class="shannon" href="https://en.wikipedia.org/wiki/Shannon_number" target="_blank" rel="noopener">Shannon's method</a>).</p>
+      <div class="maths" id="maths"></div>
+    </section>
+    <section class="card">
+      <h2>Legal moves in this position <small id="move-count"></small></h2>
+      <input id="move-filter" type="search" placeholder="Search moves" hidden>
+      <div id="moves"></div>
+    </section>
+    <section class="card">
+      <h2>Move history <small>legal moves available after each move</small></h2>
+      <div id="history"></div>
+    </section>
+  </div>
+</main>
+<template id="shannon-tip">
+  <div class="tip" role="tooltip">
+    <p><b>Shannon's method</b>: in 1950, Claude Shannon (the founder of information theory) estimated how many
+      different chess games are possible in his paper <i>Programming a Computer for Playing Chess</i>.</p>
+    <p><b>The idea:</b> count the choices at each turn and <b>multiply</b> them, because every option leads to its own
+      separate continuation. If White has 20 choices and Black has 20 replies, there are 20 × 20 = 400 ways to play the
+      first two moves.</p>
+    <p><b>His estimate:</b> about 30 choices per side, so about 30 × 30 ≈ 10³ possibilities for each pair of White
+      and Black moves. A typical game has about 40 such pairs, so (10³)⁴⁰ = <b>10¹²⁰ possible games</b>, now known as
+      the <i>Shannon number</i>.</p>
+    <p><b>Here:</b> instead of assuming 30, the app multiplies the actual number of legal moves at each position in
+      your game. It's still an estimate, because other lines of play would have different numbers of options.
+      For comparison, Earth has about 10⁵⁰ atoms and the observable universe about 10⁸⁰.</p>
+    <p><b>Draughts:</b> the same method works, but there are far fewer choices per turn (often only 2 to 10, and
+      captures are compulsory), so the number grows much more slowly. Draughts has about 5×10²⁰ possible positions,
+      few enough that computers solved it in 2007: perfect play from both sides is a draw.</p>
+    <p><b>Scrabble:</b> every placement of your tiles that makes valid words counts as a move, plus every possible
+      exchange and passing, so a single rack often has hundreds or thousands of options (tens of thousands with
+      blanks). The count here only uses the tiles actually drawn; the real game tree also branches on every possible
+      draw from the bag, so the true number of possible games is far bigger still.</p>
+    <p><b>Go:</b> on a 19×19 board almost every empty point is a legal move, so the first move has 361 options and
+      games last 200 to 300 moves. Estimates of the Go game tree run to around 10³⁶⁰ games. Even the number of legal
+      <i>positions</i>, counted exactly in 2016, is about 2×10¹⁷⁰: far more than the atoms in the observable universe.</p>
+    <p style="color:var(--muted)">Click the link to read more on Wikipedia.</p>
+  </div>
+</template>
+<script>
+const GLYPH = { K:"♚", Q:"♛", R:"♜", B:"♝", N:"♞", P:"♟", k:"♚", q:"♛", r:"♜", b:"♝", n:"♞", p:"♟" };
+const FILES = "abcdefgh";
+
+let game = "chess";  // "chess" or "draughts"
+const movesByGame = { chess: [], draughts: [], scrabble: [], go: [] };  // each game keeps its own line when you switch
+const newSeed = () => Math.floor(Math.random() * 1e9);
+let scrabbleSeed = newSeed();  // decides the Scrabble tile draws
+let goSize = 19;
+let sideNames = { white: "White", black: "Black" };
+let layout = null;     // Scrabble premium squares
+let preview = null;    // Scrabble move being hovered (shown as ghost tiles)
+let moves = [];      // move ids of the main line for the current game
+let history = [];    // server response: one entry per ply (0 = start)
+let viewPly = 0;     // which ply is displayed
+let selected = null; // selected square
+let flipped = false;
+let atomsLog10 = 50.12;
+
+// Scientific notation from log10 (exact digits when small enough).
+function sci(log10, exact) {
+  if (log10 < 9) return Number(exact).toLocaleString();
+  const e = Math.floor(log10);
+  return `${(10 ** (log10 - e)).toFixed(2)}×10<sup>${e}</sup>`;
+}
+
+async function load(randomMoves = 0) {
+  const requested = game;
+  const res = await fetch("/api/position", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ game, moves, random_moves: randomMoves, seed: scrabbleSeed, size: goSize }),
+  });
+  const data = await res.json();
+  if (requested !== game) return;  // the user switched games while this was loading
+  if (!res.ok) { document.getElementById("error").textContent = data.error; return; }
+  document.getElementById("error").textContent = "";
+  moves = movesByGame[game] = data.moves;
+  history = data.history;
+  atomsLog10 = data.atoms_on_earth_log10;
+  sideNames = data.side_names;
+  layout = data.layout;
+  preview = null;
+  viewPly = history.length - 1;
+  selected = null;
+  render();
+}
+
+function play(uci) {
+  moves = moves.slice(0, viewPly);  // playing from an earlier position starts a new line
+  moves.push(uci);
+  load();
+}
+
+function current() { return history[viewPly]; }
+
+function render() { renderBoard(); renderMoves(); renderHistory(); renderCounter(); }
+
+function renderMaths() {
+  const n = viewPly;
+  const counts = history.slice(0, n + 1).map(h => h.legal_count);
+  const isWhite = i => history[i].turn === "white";
+  const span = (c, i) => `<span class="${isWhite(i) ? "w" : "b"}">${c}</span>`;
+  const whiteTerms = counts.filter((_, i) => isWhite(i));
+  const blackTerms = counts.filter((_, i) => !isWhite(i));
+  const h = current();
+  const fmt = x => x.toLocaleString();
+
+  // Product uses the choices made to get here: positions 0..n-1.
+  const used = counts.slice(0, n);
+  const logs = used.map(c => Math.log10(c));
+  const logSum = logs.reduce((a, b) => a + b, 0);
+  const diff = h.product_log10 - atomsLog10;
+
+  document.getElementById("maths").innerHTML = `
+    <h3>This game: every option offered, including now (<span class="w" style="color:var(--accent)">${sideNames.white}</span> / <span style="color:var(--capture)">${sideNames.black}</span>)</h3>
+    <div class="eq">${sideNames.white} = ${whiteTerms.map(c => `<span class="w">${c}</span>`).join(" + ") || "0"} = <span class="res">${fmt(h.white_sum)}</span></div>
+    <div class="eq">${sideNames.black} = ${blackTerms.map(c => `<span class="b">${c}</span>`).join(" + ") || "0"} = <span class="res">${fmt(h.black_sum)}</span></div>
+    <div class="eq">Total = ${fmt(h.white_sum)} + ${fmt(h.black_sum)} = <span class="res">${fmt(h.total_sum)}</span></div>
+
+    <h3>Shannon: number of ways to play ${n} move${n === 1 ? "" : "s"}</h3>
+    <div class="eq">${n === 0 ? "No moves yet, so 1 way (the empty game)" :
+      `${used.map(span).join(" × ")} = <span class="res">${sci(h.product_log10, h.product)}</span>`}</div>
+    ${h.product_log10 >= 9 ? `<div class="eq">Exact: <span class="res">${h.product}</span> (${h.product.length} digits)</div>` : ""}
+
+    <h3>In powers of 10: logarithms turn × into +</h3>
+    <div class="eq">log₁₀(product) = ${n === 0 ? "log₁₀(1) = 0" :
+      `${logs.map((l, i) => `log₁₀(${span(used[i], i)})`).slice(0, 6).join(" + ")}${n > 6 ? " + …" : ""}
+       = ${logs.map(l => l.toFixed(2)).join(" + ")} = <span class="res">${logSum.toFixed(2)}</span>`}</div>
+    <div class="eq">Average options per move = 10<sup>${logSum.toFixed(2)} ÷ ${Math.max(n, 1)}</sup> ≈ <span class="res">${n ? (10 ** (logSum / n)).toFixed(1) : "–"}</span>
+      (geometric mean)</div>
+
+    <h3>Compared with atoms on Earth</h3>
+    <div class="eq">Atoms on Earth ≈ 1.33×10<sup>50</sup>, so log₁₀ = ${atomsLog10.toFixed(2)}</div>
+    <div class="eq">product ÷ atoms = 10<sup>${h.product_log10.toFixed(2)} − ${atomsLog10.toFixed(2)}</sup> = 10<sup>${diff.toFixed(2)}</sup>
+      ⇒ <span class="res">${diff >= 0 ? `about ${sci(diff, Math.round(10 ** diff))} times more games than atoms`
+                                     : `need another ${(-diff).toFixed(2)} powers of 10`}</span></div>
+    ${diff < 0 && n ? `<div class="eq">At ≈${(10 ** (logSum / n)).toFixed(1)} options per move, that's about
+      ${Math.ceil(-diff / (logSum / n))} more moves (${(-diff).toFixed(2)} ÷ ${(logSum / n).toFixed(2)})</div>` : ""}`;
+}
+
+// Rough atom counts (mass ÷ average atomic mass), good to about a power of 10.
+const BENCHMARKS = [
+  { icon: "🧍", name: "A human", log10: Math.log10(7e27),
+    fact: "70 kg person. About two-thirds of your atoms are hydrogen." },
+  { icon: "🏔️", name: "Mount Everest", log10: Math.log10(5e39),
+    fact: "Roughly 162 billion tonnes of rock (the mass itself is only a rough estimate)." },
+  { icon: "🌕", name: "The Moon", log10: Math.log10(2e48),
+    fact: "7.3×10²² kg, about 1/81 of Earth's mass." },
+  { icon: "🌍", name: "Planet Earth", log10: Math.log10(1.33e50),
+    fact: "6×10²⁴ kg. This is the target!" },
+  { icon: "☀️", name: "The Sun", log10: Math.log10(1.2e57),
+    fact: "2×10³⁰ kg, mostly hydrogen, the lightest atom, so it packs in a huge number." },
+  { icon: "🪐", name: "The whole solar system", log10: Math.log10(1.2017e57),
+    fact: "The Sun is 99.86% of the solar system's mass, so all the planets added together barely move the number." },
+  { icon: "🌌", name: "The observable universe", log10: 80,
+    fact: "About 10⁸⁰ atoms. Shannon's 10¹²⁰ possible chess games beats even this." },
+];
+
+function renderLadder() {
+  const h = current();
+  let nextShown = false;
+  document.getElementById("ladder").innerHTML = BENCHMARKS.map(b => {
+    const passed = h.product_log10 >= b.log10;
+    let detail = "";
+    if (passed) {
+      const at = history.slice(0, viewPly + 1).find(x => x.product_log10 >= b.log10);
+      const times = h.product_log10 - b.log10;
+      detail = `Passed at move ${at.ply}. Now ${times < 3 ? (10 ** times).toFixed(1) + "×" : "about " + sci(times, Math.round(10 ** times)) + "×"} more games than atoms.`;
+    }
+    const isNext = !passed && !nextShown;
+    if (isNext) {
+      nextShown = true;
+      detail = `Next milestone: need another ${(b.log10 - h.product_log10).toFixed(1)} powers of 10.`;
+    }
+    return `<div class="rung${passed ? " passed" : ""}${isNext ? " next" : ""}">
+      <span class="icon">${b.icon}</span><span class="name">${b.name}</span>
+      <span class="atoms">${sci(b.log10, 0)} atoms</span>
+      <span class="fact">${b.fact}${detail ? `<br><b>${detail}</b>` : ""}</span></div>`;
+  }).join("");
+}
+
+function renderCounter() {
+  renderLadder();
+  renderMaths();
+  const h = current();
+  document.getElementById("counter-ply").textContent = `after ${h.ply} move${h.ply === 1 ? "" : "s"} (plies)`;
+  document.getElementById("white-label").textContent = `Available to ${sideNames.white}`;
+  document.getElementById("black-label").textContent = `Available to ${sideNames.black}`;
+  document.getElementById("white-sum").textContent = h.white_sum.toLocaleString();
+  document.getElementById("black-sum").textContent = h.black_sum.toLocaleString();
+  document.getElementById("total-sum").textContent = h.total_sum.toLocaleString();
+  document.getElementById("played").textContent = h.ply.toLocaleString();
+  const positions = h.ply + 1;
+  document.getElementById("game-avg").textContent =
+    `${h.total_sum.toLocaleString()} options across ${positions} position${positions === 1 ? "" : "s"} = ` +
+    `${(h.total_sum / positions).toFixed(1)} available per move on average.`;
+  document.getElementById("product").innerHTML = sci(h.product_log10, h.product);
+  const pct = Math.min(100, (h.product_log10 / atomsLog10) * 100);
+  document.getElementById("bar-fill").style.width = pct + "%";
+  const beaten = h.product_log10 >= atomsLog10;
+  document.getElementById("bar").classList.toggle("done", beaten);
+  document.getElementById("bar-label").textContent =
+    `${pct.toFixed(0)}% of the way to atoms on Earth (log scale: 10^${h.product_log10.toFixed(1)} of 10^${atomsLog10.toFixed(1)})`;
+  document.getElementById("verdict").innerHTML = beaten
+    ? `✅ More possible games than atoms on Earth, by a factor of about 10<sup>${Math.floor(h.product_log10 - atomsLog10)}</sup>.`
+    : "Not there yet. Keep playing.";
+}
+
+function renderBoard() {
+  const pos = current();
+  document.getElementById("status").textContent =
+    (viewPly < history.length - 1 ? `Viewing ply ${viewPly} of ${history.length - 1} — ` : "") + pos.status;
+  const board = document.getElementById("board");
+  board.innerHTML = "";
+  board.classList.toggle("draughts", game === "draughts");
+  board.classList.toggle("scrabble", game === "scrabble");
+  board.classList.toggle("go", game === "go");
+  board.style.setProperty("--n", game === "go" ? pos.size : game === "scrabble" ? 15 : 8);
+  renderGameInfo();
+  if (game === "scrabble") return renderScrabbleBoard(board, pos);
+  if (game === "go") return renderGoBoard(board, pos);
+  const targets = selected ? pos.legal_moves.filter(m => m.from === selected) : [];
+  const last = history[viewPly].move_squares || [];
+
+  for (let r = 0; r < 8; r++) {
+    for (let f = 0; f < 8; f++) {
+      const file = flipped ? 7 - f : f, rank = flipped ? r : 7 - r;
+      const name = FILES[file] + (rank + 1);
+      const sq = document.createElement("div");
+      sq.className = "sq " + ((file + rank) % 2 ? "light" : "dark");
+      if (last.includes(name)) sq.classList.add("last");
+      if (name === selected) sq.classList.add("sel");
+      if (name === pos.check_square) sq.classList.add("check");
+      const t = targets.find(m => m.to === name);
+      if (t) sq.classList.add("target", ...(t.capture ? ["cap"] : []));
+      const p = pos.pieces[name];
+      if (game === "draughts") {
+        // b/w = man, B/W = king (shown with a crown)
+        if (p) sq.innerHTML = `<span class="disc ${p.toLowerCase() === "w" ? "dw" : "db"}">${p === p.toUpperCase() ? "♛" : ""}</span>`;
+        if (pos.numbers[name]) sq.innerHTML += `<span class="num">${pos.numbers[name]}</span>`;
+      } else {
+        if (p) sq.innerHTML = `<span class="${p === p.toUpperCase() ? "pw" : "pb"}">${GLYPH[p]}</span>`;
+        if (f === 0) sq.innerHTML += `<span class="coord rank">${rank + 1}</span>`;
+        if (r === 7) sq.innerHTML += `<span class="coord file">${FILES[file]}</span>`;
+      }
+      sq.onclick = () => clickSquare(name);
+      board.appendChild(sq);
+    }
+  }
+}
+
+const LETTER_VALUES = Object.fromEntries("ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((L, i) =>
+  [L, [1,3,3,2,1,4,2,4,1,8,5,1,3,1,1,3,10,1,1,1,1,4,4,8,4,10][i]]));
+
+function tileHTML(ch, extra = "") {
+  const blank = ch === "?" || ch === ch.toLowerCase();
+  return `<span class="tile${blank ? " blank" : ""}${extra}">${ch === "?" ? "" : ch.toUpperCase()}` +
+         `${blank ? "" : `<sub>${LETTER_VALUES[ch]}</sub>`}</span>`;
+}
+
+function renderScrabbleBoard(board, pos) {
+  const last = new Set(history[viewPly].move_squares || []);
+  const ghosts = Object.fromEntries((preview?.tiles || []).map(([r, c, ch]) => [`${r},${c}`, ch]));
+  for (let r = 0; r < 15; r++) {
+    for (let c = 0; c < 15; c++) {
+      const name = `${r},${c}`;
+      const prem = layout?.[name];
+      const sq = document.createElement("div");
+      sq.className = "sq" + (prem ? " " + prem : "") + (name === selected ? " filter" : "");
+      sq.title = `${"ABCDEFGHIJKLMNO"[c]}${r + 1}${prem ? " (" + {TW: "triple word", DW: "double word", TL: "triple letter", DL: "double letter"}[prem] + ")" : ""}`;
+      const ch = pos.pieces[name];
+      if (ch) sq.innerHTML = tileHTML(ch, last.has(name) ? " last" : "");
+      else if (ghosts[name]) sq.innerHTML = tileHTML(ghosts[name], " ghost");
+      else sq.textContent = r === 7 && c === 7 ? "★" : (prem || "");
+      sq.onclick = () => { selected = selected === name ? null : name; renderBoard(); renderMoves(); };
+      board.appendChild(sq);
+    }
+  }
+}
+
+const GO_COLUMNS = "ABCDEFGHJKLMNOPQRST";
+
+function renderGoBoard(board, pos) {
+  const n = pos.size;
+  const last = new Set(history[viewPly].move_squares || []);
+  const stars = new Set(pos.star_points);
+  const ghost = preview && preview.uci !== "pass" ? preview.uci : null;
+  const me = pos.turn === "black" ? "b" : "w";
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < n; c++) {
+      const name = `${GO_COLUMNS[c]}${n - r}`;
+      const sq = document.createElement("div");
+      const stone = pos.pieces[name];
+      const why = pos.illegal_points[name];
+      sq.className = "sq gp" + (c === 0 ? " l" : "") + (c === n - 1 ? " r" : "") + (r === 0 ? " t" : "") + (r === n - 1 ? " b" : "") +
+                     (!stone && !why && !pos.game_over ? " can" : "") + (why ? " no" : "");
+      sq.title = name + (why ? ` (can't play here: ${why})` : "");
+      if (stars.has(name)) sq.innerHTML += `<span class="hoshi"></span>`;
+      if (stone) sq.innerHTML += `<span class="stone ${stone}${last.has(name) ? " last" : ""}"></span>`;
+      else if (name === ghost) sq.innerHTML += `<span class="stone ${me} ghost"></span>`;
+      else if (why === "ko") sq.innerHTML += `<span class="ko"></span>`;
+      else if (!why) sq.innerHTML += `<span class="stone ${me} hover"></span>`;
+      sq.onclick = () => {
+        if (stone || pos.game_over) return;
+        if (why) { document.getElementById("error").textContent = `${name}: ${why === "ko" ? "ko, that would repeat an earlier position" : "suicide, your stones would have no liberties"}.`; return; }
+        play(name);
+      };
+      board.appendChild(sq);
+    }
+  }
+}
+
+function renderGameInfo() {
+  const el = document.getElementById("scrabble-info");
+  const pos = current();
+  if (game === "go") {
+    el.innerHTML = `<div class="note">Captured stones: Black ${pos.captures.black}, White ${pos.captures.white}. ` +
+      `Click any point to play. Two passes in a row end the game.</div>`;
+    return;
+  }
+  if (game !== "scrabble") { el.innerHTML = ""; return; }
+  el.innerHTML = ["white", "black"].map((side, i) => `
+    <div class="rack-row${pos.turn === side && !pos.game_over ? " to-move" : ""}">
+      <span class="who">${sideNames[side]}: <b>${pos.scores[i]}</b> pts</span>
+      <span class="rack">${pos.racks[i].split("").map(ch => tileHTML(ch)).join("")}</span>
+    </div>`).join("") +
+    `<div class="note">Tiles left in the bag: ${pos.bag}. Click a square to see only the moves that use it.</div>`;
+}
+
+function clickSquare(name) {
+  const pos = current();
+  if (selected) {
+    const options = pos.legal_moves.filter(m => m.from === selected && m.to === name);
+    if (options.length) {
+      // Several moves can share start/end squares: a chess promotion, or draughts captures by different routes.
+      let move = options[0];
+      if (options.length > 1 && game === "draughts") {
+        const pick = prompt("Which capture route?\n" + options.map((m, i) => `${i + 1}: ${m.san}`).join("\n"), "1");
+        move = options[(parseInt(pick) || 1) - 1] || options[0];
+      } else if (options.length > 1) {
+        const pick = (prompt("Promote to (q, r, b, n):", "q") || "q").toLowerCase();
+        move = options.find(m => m.promotion === pick) || options.find(m => m.promotion === "q");
+      }
+      play(move.uci);
+      return;
+    }
+  }
+  selected = pos.legal_moves.some(m => m.from === name) && name !== selected ? name : null;
+  render();
+}
+
+const SCRABBLE_SHOWN = 300;
+
+function renderMoves() {
+  const pos = current();
+  document.getElementById("move-count").textContent =
+    `${pos.legal_count.toLocaleString()} move${pos.legal_count === 1 ? "" : "s"} for ${sideNames[pos.turn]}`;
+  const box = document.getElementById("moves");
+  const filterBox = document.getElementById("move-filter");
+  filterBox.hidden = !["scrabble", "go"].includes(game);
+  filterBox.placeholder = game === "go" ? "Search moves, e.g. Q16" : "Search moves, e.g. QUIZ or 8H";
+  if (!pos.legal_count) { box.innerHTML = `<p>No legal moves — ${pos.status}.</p>`; return; }
+  let list = pos.legal_moves;
+  let note = "";
+  if (game === "go") {
+    const q = filterBox.value.trim().toUpperCase();
+    if (q) list = list.filter(m => m.san.toUpperCase().includes(q));
+    if (pos.legal_truncated) note = `Showing a sample of ${pos.legal_moves.length} of ${pos.legal_count} moves for this earlier position. Click any point on the board to play there.`;
+  } else if (game === "scrabble") {
+    const q = filterBox.value.trim().toUpperCase();
+    if (q) list = list.filter(m => m.san.toUpperCase().includes(q));
+    if (selected) list = list.filter(m => (m.tiles || []).some(([r, c]) => `${r},${c}` === selected));
+    const matched = list.length;
+    list = list.slice(0, SCRABBLE_SHOWN);
+    note = `Best-scoring first. Showing ${list.length.toLocaleString()} of ${matched.toLocaleString()}` +
+           (q || selected ? " matching" : "") +
+           (pos.legal_truncated ? ` (the ${pos.legal_moves.length.toLocaleString()} highest-scoring of all ${pos.legal_count.toLocaleString()} moves are searchable)` : "") +
+           (selected ? ". Click the square again to clear it." : ".");
+  }
+  const groups = {};
+  for (const m of list) (groups[m.piece] ||= []).push(m);
+  box.innerHTML = note ? `<p class="note" style="margin:0 0 8px">${note}</p>` : "";
+  for (const [piece, list] of Object.entries(groups)) {
+    const g = document.createElement("div");
+    g.className = "group";
+    g.innerHTML = `<div class="group-title">${piece} (${list.length})</div>`;
+    const chips = document.createElement("div");
+    chips.className = "chips";
+    for (const m of list) {
+      const c = document.createElement("span");
+      c.className = "chip" + (m.capture ? " cap" : "") + (m.check ? " chk" : "") + (m.from === selected ? " hl" : "");
+      c.textContent = m.san;
+      c.title = `${m.from} → ${m.to}${m.capture ? " (capture)" : ""}${m.check ? " (check)" : ""}`;
+      c.onclick = () => play(m.uci);
+      if (game === "scrabble" || game === "go") {
+        c.onmouseenter = () => { preview = m; renderBoard(); };
+        c.onmouseleave = () => { preview = null; renderBoard(); };
+        c.title = m.tiles ? `${m.score} points` : m.san;
+      } else {
+        c.onmouseenter = () => { selected = m.from; renderBoard(); };
+      }
+      chips.appendChild(c);
+    }
+    g.appendChild(chips);
+    box.appendChild(g);
+  }
+}
+
+function renderHistory() {
+  const rows = history.map(h => {
+    const who = h.ply === 0 ? "" : (h.ply % 2 ? `${Math.ceil(h.ply / 2)}.` : `${h.ply / 2}…`);
+    const shown = h.legal_moves.slice(0, 40).map(m => m.san).join(" ");
+    const preview = shown + (h.legal_count > 40 ? ` … +${(h.legal_count - 40).toLocaleString()} more` : "");
+    return `<tr class="ply${h.ply === viewPly ? " current" : ""}" data-ply="${h.ply}">
+      <td>${who}</td><td><b>${h.san ?? "Start"}</b></td>
+      <td class="count">${h.legal_count.toLocaleString()}</td>
+      <td class="count">${h.total_sum.toLocaleString()}</td>
+      <td class="count">${sci(h.product_log10, h.product)}</td>
+      <td class="preview">${preview || h.status}</td></tr>`;
+  }).join("");
+  const el = document.getElementById("history");
+  el.innerHTML = `<table><thead><tr><th>#</th><th>Move</th><th>Replies</th><th>Sum</th><th>Product</th><th>Legal moves after this move</th></tr></thead>
+    <tbody>${rows}</tbody></table>`;
+  el.querySelectorAll("tr.ply").forEach(tr => tr.onclick = () => { viewPly = +tr.dataset.ply; selected = null; render(); });
+  // Scroll only inside the history box (scrollIntoView would scroll the whole page).
+  const row = el.querySelector("tr.current");
+  if (row) {
+    const top = row.offsetTop, bottom = top + row.offsetHeight;
+    if (top < el.scrollTop + 30) el.scrollTop = top - 30;  // 30px clears the header row
+    else if (bottom > el.scrollTop + el.clientHeight) el.scrollTop = bottom - el.clientHeight;
+  }
+}
+
+const HOW_TO_WIN = {
+  chess: {
+    url: "https://en.wikipedia.org/wiki/Rules_of_chess",
+    html: `<p><b>Objective:</b> checkmate the opponent's king: attack it so that it has no way to escape.</p>
+      <ul>
+        <li>White moves first; players alternate moving one piece per turn.</li>
+        <li>You may never make a move that leaves your own king in check.</li>
+        <li>Special moves: castling, en passant, and promoting a pawn that reaches the far side.</li>
+        <li><b>Draws:</b> stalemate (no legal move but not in check), insufficient material, threefold repetition,
+          or 50 moves without a capture or pawn move.</li>
+      </ul>`,
+  },
+  draughts: {
+    url: "https://en.wikipedia.org/wiki/English_draughts",
+    html: `<p><b>Objective:</b> leave your opponent with no legal move, usually by capturing all their pieces
+      or blocking them in.</p>
+      <ul>
+        <li>Black moves first. Pieces move one square diagonally forward on the dark squares.</li>
+        <li>Capture by jumping over an opponent's piece to the empty square beyond. Captures are
+          <b>compulsory</b>, and you must keep jumping if you can.</li>
+        <li>A piece reaching the far row is crowned a <b>king</b> and can then move backwards too.</li>
+        <li><b>Draws</b> (simplified here): threefold repetition, or 40 moves each with no capture and no man moving.</li>
+      </ul>`,
+  },
+  scrabble: {
+    url: "https://en.wikipedia.org/wiki/Scrabble#Rules",
+    html: `<p><b>Objective:</b> finish with the most points by making words on the board.</p>
+      <ul>
+        <li>Each turn, place tiles in one line to form words that connect with tiles already played.
+          The first word must cover the centre star.</li>
+        <li>Score the letter values, boosted by premium squares (double/triple letter and word).
+          Using all 7 tiles earns 50 bonus points.</li>
+        <li>Instead of playing, you can exchange tiles (if the bag has 7 or more) or pass.</li>
+        <li><b>End:</b> when someone uses their last tile with the bag empty (they gain the value of the other
+          player's remaining tiles), or after six scoreless turns in a row.</li>
+      </ul>`,
+  },
+  go: {
+    url: "https://en.wikipedia.org/wiki/Rules_of_Go",
+    html: `<p><b>Objective:</b> control more of the board than your opponent, by surrounding territory and
+      capturing stones.</p>
+      <ul>
+        <li>Black plays first; players take turns placing one stone on an empty point. Stones never move.</li>
+        <li>A group of stones with no empty points next to it (no <i>liberties</i>) is captured and removed.</li>
+        <li>You can't play a move that leaves your own stones with no liberties (suicide), or that repeats an
+          earlier position (<i>ko</i>).</li>
+        <li><b>End:</b> both players pass in a row. Score = your stones + empty points you surround;
+          White gets 7.5 bonus points (komi) for moving second.</li>
+      </ul>`,
+  },
+};
+
+const WIKI = "https://en.wikipedia.org/wiki/";
+const COMPUTERS = {
+  chess: {
+    url: WIKI + "Computer_chess",
+    solved: false, verdict: "Not solved",
+    html: `<p>Computers play far better than any human, but nobody knows the result of a perfectly played game.
+      There are too many positions to check.</p>
+      <ul>
+        <li><b>1997:</b> IBM's <a href="${WIKI}Deep_Blue_versus_Garry_Kasparov" target="_blank" rel="noopener">Deep Blue</a>
+          beat world champion Garry Kasparov in a six-game match.</li>
+        <li><b>2012 onwards:</b> every position with 7 or fewer pieces has been solved completely in
+          <a href="${WIKI}Endgame_tablebase" target="_blank" rel="noopener">endgame tablebases</a>.</li>
+        <li><b>2017:</b> DeepMind's <a href="${WIKI}AlphaZero" target="_blank" rel="noopener">AlphaZero</a> taught itself
+          chess from just the rules in hours and beat the top program Stockfish.</li>
+        <li>Today, free programs like Stockfish run on a phone and beat every human.</li>
+      </ul>`,
+  },
+  draughts: {
+    url: WIKI + "Chinook_(computer_program)",
+    solved: true, verdict: "Solved (2007): perfect play is a draw",
+    html: `<p>Draughts is the most complex game on this page that computers have completely solved.</p>
+      <ul>
+        <li><b>1990s:</b> <a href="${WIKI}Chinook_(computer_program)" target="_blank" rel="noopener">Chinook</a>,
+          from the University of Alberta, was declared Man-Machine World Champion in 1994: the first computer program to
+          win a human world championship title.</li>
+        <li><b>2007:</b> after work running from 1989 to 2007, Chinook's team proved that if both sides play perfectly
+          the game is <b>always a draw</b>, so Chinook can never lose.</li>
+        <li>They didn't have to visit all 5×10²⁰ positions: clever searching meant only a tiny fraction had to be checked.</li>
+      </ul>`,
+  },
+  scrabble: {
+    url: WIKI + "Scrabble#Computer_players",
+    solved: false, verdict: "Not solved (luck and hidden tiles)",
+    html: `<p>Scrabble can't be solved like a board game: you can't see your opponent's tiles, and the bag adds luck.
+      Computers instead play millions of simulated future turns to pick the best move on average.</p>
+      <ul>
+        <li><b>Maven</b>, by Brian Sheppard, was described in 2002 as playing
+          <a href="https://doi.org/10.1016/S0004-3702(01)00166-7" target="_blank" rel="noopener">"world-championship-caliber Scrabble"</a>.</li>
+        <li><b>2007:</b> <a href="https://github.com/quackle/quackle" target="_blank" rel="noopener">Quackle</a>, a free,
+          open-source program of similar strength, became the first computer program to win a Scrabble tournament.</li>
+        <li>Near the end of the game there's little or no hidden information left, so programs like BestBot solve
+          endgames exactly when the bag has zero or one tiles.</li>
+      </ul>`,
+  },
+  go: {
+    url: WIKI + "Computer_Go",
+    solved: false, verdict: "Not solved (only tiny boards)",
+    html: `<p>Go was long thought to be decades away for computers, because there are too many moves to search the
+      way chess programs do.</p>
+      <ul>
+        <li><b>2002:</b> the tiny 5×5 board was solved: with perfect play Black wins and takes the whole board.</li>
+        <li><b>2016:</b> DeepMind's <a href="${WIKI}AlphaGo_versus_Lee_Sedol" target="_blank" rel="noopener">AlphaGo</a>
+          beat Lee Sedol, one of the world's best players, 4 games to 1, using neural networks trained on human games
+          and self-play.</li>
+        <li><b>2017:</b> <a href="${WIKI}AlphaGo_Zero" target="_blank" rel="noopener">AlphaGo Zero</a> learned from
+          scratch with no human games and beat the earlier AlphaGo 100–0.</li>
+        <li>The full 19×19 game is nowhere near solved; even its number of positions (about 2×10¹⁷⁰) is beyond reach.</li>
+      </ul>`,
+  },
+};
+
+function setGame(g) {
+  const ai = COMPUTERS[g];
+  document.getElementById("ai-link").href = ai.url;
+  document.getElementById("ai-tip").innerHTML =
+    `<span class="verdict-badge ${ai.solved ? "yes" : "no"}">${ai.solved ? "✅" : "❌"} ${ai.verdict}</span>` + ai.html +
+    `<p style="color:var(--muted)">Click the link above, or any link here, to read more on Wikipedia.</p>`;
+  const howTo = HOW_TO_WIN[g];
+  document.getElementById("howto-link").href = howTo.url;
+  document.getElementById("howto-tip").innerHTML = howTo.html +
+    `<p style="color:var(--muted)">Click the link for the full rules on Wikipedia.</p>`;
+  game = g;
+  document.getElementById("go-size").hidden = g !== "go";
+  document.getElementById("move-filter").value = "";
+  moves = movesByGame[g];
+  selected = null;
+  document.querySelectorAll(".game-switch button").forEach(b => b.classList.toggle("active", b.dataset.game === g));
+  try { localStorage.setItem("game", g); } catch (e) {}
+  load();
+}
+document.querySelectorAll(".game-switch button").forEach(b => b.onclick = () => { if (b.dataset.game !== game) setGame(b.dataset.game); });
+
+document.getElementById("back").onclick = () => { if (viewPly > 0) { viewPly--; selected = null; render(); } };
+document.getElementById("fwd").onclick = () => { if (viewPly < history.length - 1) { viewPly++; selected = null; render(); } };
+document.getElementById("undo").onclick = () => { moves.pop(); load(); };
+document.getElementById("flip").onclick = () => { flipped = !flipped; renderBoard(); };
+document.getElementById("reset").onclick = () => {
+  moves = movesByGame[game] = [];
+  if (game === "scrabble") scrabbleSeed = newSeed();  // fresh tiles for a new game
+  load();
+};
+document.getElementById("move-filter").oninput = () => renderMoves();
+document.getElementById("go-size").onchange = e => {
+  goSize = +e.target.value;
+  moves = movesByGame.go = [];  // a different board size is a new game
+  load();
+};
+document.getElementById("rand1").onclick = () => { moves = moves.slice(0, viewPly); load(1); };
+document.getElementById("rand10").onclick = () => { moves = moves.slice(0, viewPly); load(10); };
+document.addEventListener("keydown", e => {
+  if (e.key === "ArrowLeft") document.getElementById("back").click();
+  if (e.key === "ArrowRight") document.getElementById("fwd").click();
+});
+// Attach the Shannon explanation tooltip to every "Shannon's method" link.
+document.querySelectorAll("a.shannon").forEach(a => {
+  const wrap = document.createElement("span");
+  wrap.className = "tip-wrap";
+  a.replaceWith(wrap);
+  wrap.appendChild(a);
+  wrap.appendChild(document.getElementById("shannon-tip").content.cloneNode(true));
+});
+let saved = null;
+try { saved = localStorage.getItem("game"); } catch (e) {}
+setGame(["draughts", "scrabble", "go"].includes(saved) ? saved : "chess");
+</script>
+</body>
+</html>
