@@ -1,24 +1,26 @@
 # Motivation
 
-There are estimated to be around \(10^{120}\) possible games of chess, compared with approximately \(10^{80}\) atoms in the observable universe.
+There are estimated to be around $10^{120}$ possible games of chess, compared with approximately $10^{80}$ atoms in the observable universe.
 
-Possible games of chess
-\(10^{120}\)
-A 1 followed by 120 zeros
+| | Number | Written out |
+|---|---|---|
+| Possible games of chess | $10^{120}$ | A 1 followed by 120 zeros |
+| Atoms in the observable universe | $10^{80}$ | A 1 followed by 80 zeros |
 
-Atoms in the observable universe
-\(10^{80}\)
-A 1 followed by 80 zeros
+### Where does the chess number come from?
 
-Where does the chess number come from?
 In 1950, mathematician Claude Shannon estimated the number of possible chess games by considering two things:
+
 - The average number of legal moves available at each turn.
 - The typical length of a game, roughly 40 moves per player.
 
-There's one important catch
-The \(10^{120}\) figure is an estimate of game-tree complexity, not an exact count of every legal chess game. The precise number depends on what counts as a distinct game and how game endings and repetition rules are handled.
+### There's one important catch
+
+The $10^{120}$ figure is an estimate of game-tree complexity, not an exact count of every legal chess game. The precise number depends on what counts as a distinct game and how game endings and repetition rules are handled.
+
 Also, a game is a sequence of moves, whereas a position is a particular arrangement of pieces on the board. Different games can lead to the same position.
-The bottom line: The comparison is a well-established mathematical illustration, and the numbers are so far apart that reasonable refinements don't change the conclusion. The possible ways to play chess vastly outnumber the atoms in the observable universe.
+
+**The bottom line:** The comparison is a well-established mathematical illustration, and the numbers are so far apart that reasonable refinements don't change the conclusion. The possible ways to play chess vastly outnumber the atoms in the observable universe.
 
 # Move Explorer
 
