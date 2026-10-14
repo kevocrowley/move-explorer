@@ -1,6 +1,8 @@
 # Move Explorer
 
-A small Flask web app that shows **every legal move available after each move** in four games
+**Live site: https://kevocrowley.github.io/move-explorer/**
+
+A web app that shows **every legal move available after each move** in four games
 (chess, English draughts, Scrabble and Go), and uses those counts to show that there are more possible
 games than atoms on planet Earth.
 
@@ -21,25 +23,29 @@ games than atoms on planet Earth.
 | Scrabble | hundreds to thousands per rack | depends on the tiles |
 | Draughts | 7 | only in long games |
 
-## Running it
+## How it runs
 
-Requires Python 3.10+.
+The game logic is Python, but there is no server: the page runs it in the browser with
+[Pyodide](https://pyodide.org) inside a Web Worker. The first visit downloads Python (about 10 MB,
+then cached), which takes a few seconds; after that, moves are instant. That means the whole site is
+static files and is hosted free on GitHub Pages.
+
+To run it locally, serve the folder with any static file server:
 
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-.venv/bin/python app.py
+python3 -m http.server 5050
 ```
 
 Then open http://127.0.0.1:5050.
 
 ## Files
 
-- `app.py`: the Flask server and the `/api/position` endpoint, which replays a game and returns
-  every position with its legal moves and running totals.
+- `engine.py`: replays a game and returns every position with its legal moves and running totals
+  (`handle()` is the entry point the page calls).
+- `worker.js`: loads Pyodide and python-chess, then runs `engine.py` off the main thread.
 - `draughts.py`, `scrabble.py`, `go.py`: rules and move generators (chess uses
   [python-chess](https://python-chess.readthedocs.io/)).
-- `templates/index.html`: the whole front end.
+- `index.html`: the whole front end.
 - `data/enable1.txt`: the ENABLE word list used for Scrabble.
 
 ## Rules and simplifications
@@ -58,4 +64,6 @@ true number larger still.
 
 ## Credits
 
+- [Pyodide](https://pyodide.org) runs the Python in the browser; chess rules use
+  [python-chess](https://python-chess.readthedocs.io/) 1.10.0 (the newest version published in a form Pyodide can install).
 - Word list: ENABLE (Enhanced North American Benchmark Lexicon), public domain.

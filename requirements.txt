@@ -1,2 +1,1 @@
-flask
-chess
+chess==1.10.0

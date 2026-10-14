@@ -55,6 +55,8 @@
   .preview { color: var(--muted); white-space: normal; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
   .side { display: grid; gap: 16px; }
   .err { color: var(--capture); }
+  .engine-status { margin: 0 0 8px; padding: 8px 12px; border-radius: 6px; font-weight: 600;
+                   background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
   .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
   .stat { background: var(--bg); border-radius: 8px; padding: 8px 10px; }
   .stat .label { font-size: 12px; color: var(--muted); }
@@ -183,6 +185,7 @@
       </span>
       <div id="status">Loading…</div>
     </div>
+    <div id="engine-status" class="engine-status" hidden>Starting…</div>
     <div id="board"></div>
     <div id="scrabble-info"></div>
     <div class="controls">
@@ -286,15 +289,43 @@ function sci(log10, exact) {
   return `${(10 ** (log10 - e)).toFixed(2)}×10<sup>${e}</sup>`;
 }
 
+// The game engine is Python (engine.py) running in a Web Worker via Pyodide; see worker.js.
+const engine = new Worker("worker.js");
+const pending = new Map();
+let nextId = 0;
+engine.onmessage = ({ data }) => {
+  if (data.type === "status") return showEngineStatus(data.text);
+  pending.get(data.id)?.(data);
+  pending.delete(data.id);
+};
+engine.onerror = e => showEngineStatus("The game engine failed to load: " + (e.message || "unknown error"));
+
+function callEngine(body) {
+  return new Promise(resolve => {
+    const id = nextId++;
+    pending.set(id, resolve);
+    engine.postMessage({ id, body });
+  });
+}
+
+let engineStartup = "";
+function showEngineStatus(text) {
+  engineStartup = text;
+  const el = document.getElementById("engine-status");
+  el.textContent = text;
+  el.hidden = !text;
+}
+
 async function load(randomMoves = 0) {
   const requested = game;
-  const res = await fetch("/api/position", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ game, moves, random_moves: randomMoves, seed: scrabbleSeed, size: goSize }),
-  });
-  const data = await res.json();
+  // Show "Working…" only if the engine takes a moment (e.g. Scrabble with blanks).
+  const busy = setTimeout(() => { if (!engineStartup) showEngineStatus("Working…"); }, 300);
+  const reply = await callEngine({ game, moves, random_moves: randomMoves, seed: scrabbleSeed, size: goSize });
+  clearTimeout(busy);
+  if (engineStartup === "Working…") showEngineStatus("");
   if (requested !== game) return;  // the user switched games while this was loading
-  if (!res.ok) { document.getElementById("error").textContent = data.error; return; }
+  if (!reply.ok) { document.getElementById("error").textContent = reply.error; return; }
+  const data = reply.data;
   document.getElementById("error").textContent = "";
   moves = movesByGame[game] = data.moves;
   history = data.history;

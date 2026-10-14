@@ -1,18 +1,19 @@
-"""Legal-move explorer for chess and draughts: shows every legal move available after each move played."""
+"""Move Explorer engine: replays a game of chess, draughts, Scrabble or Go and reports every legal move
+available after each move, with running totals.
 
+It runs in the browser under Pyodide (see worker.js); `handle` is the entry point the page calls.
+"""
+
+import json
 import math
 import random
+from functools import lru_cache
 
 import chess
-from flask import Flask, jsonify, render_template, request
-
-from functools import lru_cache
 
 import go
 import scrabble
 from draughts import DraughtsBoard, square_name, square_number
-
-app = Flask(__name__)
 
 ATOMS_ON_EARTH = 133 * 10**48  # ~1.33 x 10^50
 
@@ -250,13 +251,11 @@ class GoGame:
 GAMES = {"chess": ChessGame, "draughts": DraughtsGame, "scrabble": ScrabbleGame, "go": GoGame}
 
 
-@app.route("/")
-def index():
-    return render_template("index.html")
+class MoveError(ValueError):
+    pass
 
 
-@app.post("/api/position")
-def position():
+def position(body):
     """Given the moves played so far, return the position after each ply with its legal moves.
 
     Body: {"game": "chess"|"draughts"|"scrabble"|"go", "moves": [...], "random_moves": n,
@@ -264,17 +263,13 @@ def position():
     The optional random_moves extends the line with n random legal moves (stopping when the game
     ends). Scrabble uses the seed to decide the tile draws, so a game replays identically.
     """
-    body = request.get_json(force=True)
     game = GAMES.get(body.get("game", "chess"))
     if game is None:
-        return jsonify({"error": f"Unknown game {body.get('game')!r}"}), 400
+        raise MoveError(f"Unknown game {body.get('game')!r}")
     moves = list(body.get("moves", []))
     random_left = int(body.get("random_moves", 0))
 
-    try:
-        board = game.new(body)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+    board = game.new(body)
     history = []
     white_sum = black_sum = 0
     product = 1  # product of the move counts at every position before this one
@@ -305,10 +300,7 @@ def position():
                 break
             moves.append(random.choice(entry["legal_moves"])["uci"])
             random_left -= 1
-        try:
-            san, squares = game.push(board, moves[ply])
-        except ValueError as e:
-            return jsonify({"error": str(e)}), 400
+        san, squares = game.push(board, moves[ply])
         product *= count
         ply += 1
 
@@ -319,15 +311,19 @@ def position():
             entry["legal_moves"] = entry["legal_moves"][:limit]
             entry["legal_truncated"] = True
 
-    return jsonify({
+    return {
         "game": body.get("game", "chess"),
         "side_names": game.side_names,
         "layout": {f"{r},{c}": p for (r, c), p in scrabble.PREMIUMS.items()} if game is ScrabbleGame else None,
         "moves": moves,
         "history": history,
         "atoms_on_earth_log10": math.log10(ATOMS_ON_EARTH),
-    })
+    }
 
 
-if __name__ == "__main__":
-    app.run(debug=True, port=5050)
+def handle(body_json):
+    """JSON in, JSON out: {"ok": true, "data": {...}} or {"ok": false, "error": "..."}."""
+    try:
+        return json.dumps({"ok": True, "data": position(json.loads(body_json))})
+    except ValueError as e:  # illegal moves, bad options
+        return json.dumps({"ok": False, "error": str(e)})
