@@ -15,6 +15,7 @@
             --accent: #6ea2ff; --capture: #ff7b6b; }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }  /* so the hidden attribute beats display rules like .consent's flex */
   body { margin: 0; font: 14px/1.45 system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); }
   main { display: grid; grid-template-columns: minmax(300px, min(780px, calc(100vh - 110px))) 1fr; gap: 20px; padding: 16px 20px; align-items: start; }
   @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
