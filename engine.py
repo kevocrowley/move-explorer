@@ -218,7 +218,8 @@ class GoGame:
         if board.over:
             legal, illegal = [], {}
             b, w = board.score()
-            status = (f"Game over: {'Black' if b > w else 'White'} wins by {abs(b - w):g} "
+            result = "It's a draw" if b == w else f"{'Black' if b > w else 'White'} wins by {abs(b - w):g}"
+            status = (f"Game over: {result} "
                       f"(area score {b:g}–{w:g} incl. {go.KOMI:g} komi; dead stones not removed)")
         else:
             legal, illegal = board.legal_moves()

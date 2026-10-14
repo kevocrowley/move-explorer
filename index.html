@@ -369,16 +369,30 @@ function trackMilestones() {
 const engine = new Worker("worker.js");
 const pending = new Map();
 let nextId = 0;
+let engineFailure = null;
 engine.onmessage = ({ data }) => {
   if (data.type === "status") return showEngineStatus(data.text);
   pending.get(data.id)?.(data);
   pending.delete(data.id);
 };
-engine.onerror = e => showEngineStatus("The game engine failed to load: " + (e.message || "unknown error"));
+function failEngine(message) {
+  engineFailure = message || "unknown error";
+  showEngineStatus("The game engine failed to load: " + engineFailure);
+  for (const [id, resolve] of pending) {
+    resolve({ id, ok: false, error: "The game engine failed to load: " + engineFailure });
+  }
+  pending.clear();
+}
+engine.onerror = e => { e.preventDefault(); failEngine(e.message); };
+engine.onmessageerror = () => failEngine("could not read a response from the game engine");
 
 function callEngine(body) {
   return new Promise(resolve => {
     const id = nextId++;
+    if (engineFailure) {
+      resolve({ id, ok: false, error: "The game engine failed to load: " + engineFailure });
+      return;
+    }
     pending.set(id, resolve);
     engine.postMessage({ id, body });
   });
